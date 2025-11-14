@@ -70,7 +70,9 @@ class TestWorker:
         # Mock the current job context
         from unittest.mock import Mock, patch
         
-        with patch('worker.get_current_job') as mock_job:
+        with patch('worker.get_current_job') as mock_job, \
+             patch('random.random', return_value=0.5), \
+             patch('worker.send_to_recipient', return_value=True):
             mock_job.return_value = Mock(id='test-job-123')
             
             result = process_notification(job_data)
