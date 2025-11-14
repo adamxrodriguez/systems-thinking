@@ -163,12 +163,18 @@ async def process_idempotent_request(
     cached = idempotency_manager.get_cached_response(idempotency_key)
     if cached:
         # Return cached response
-        from fastapi.responses import Response as FastAPIResponse
+        from fastapi.responses import JSONResponse
         
-        response = FastAPIResponse(
-            content=cached['body'].encode('utf-8') if isinstance(cached['body'], str) else cached['body'],
+        # Parse the cached body (should be JSON string)
+        try:
+            body_content = json.loads(cached['body']) if isinstance(cached['body'], str) else cached['body']
+        except (json.JSONDecodeError, TypeError):
+            body_content = cached['body']
+        
+        response = JSONResponse(
+            content=body_content,
             status_code=cached['status_code'],
-            headers=cached['headers']
+            headers=cached.get('headers', {})
         )
         response.headers['X-Cached'] = 'true'
         response.headers['X-Cached-At'] = str(cached['cached_at'])
@@ -194,11 +200,18 @@ async def process_idempotent_request(
         await asyncio.sleep(0.1)
         cached = idempotency_manager.get_cached_response(idempotency_key)
         if cached:
-            from fastapi.responses import Response as FastAPIResponse
-            response = FastAPIResponse(
-                content=cached['body'].encode('utf-8'),
+            from fastapi.responses import JSONResponse
+            
+            # Parse the cached body (should be JSON string)
+            try:
+                body_content = json.loads(cached['body']) if isinstance(cached['body'], str) else cached['body']
+            except (json.JSONDecodeError, TypeError):
+                body_content = cached['body']
+            
+            response = JSONResponse(
+                content=body_content,
                 status_code=cached['status_code'],
-                headers=cached['headers']
+                headers=cached.get('headers', {})
             )
             response.headers['X-Cached'] = 'true'
             return response
@@ -209,30 +222,45 @@ async def process_idempotent_request(
     # Cache response if successful
     if 200 <= response.status_code < 300:
         # Extract response body
-        # For FastAPI JSONResponse, we can get the media/content before rendering
         from fastapi.responses import JSONResponse
         
         if isinstance(response, JSONResponse):
-            # JSONResponse stores the data in media attribute
-            response_data = getattr(response, 'media', None)
-            if response_data is not None:
-                response_body = json.dumps(response_data).encode('utf-8')
+            # JSONResponse stores the data in body attribute (bytes) after rendering
+            # We need to get the body bytes and decode it
+            response_body = response.body
+            if isinstance(response_body, bytes):
+                # Body is already bytes, store as JSON string for easier retrieval
+                try:
+                    # Decode and re-encode to ensure it's valid JSON
+                    body_json = json.loads(response_body.decode('utf-8'))
+                    response_body_str = json.dumps(body_json)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    response_body_str = response_body.decode('utf-8', errors='replace')
             else:
-                # Fallback to empty JSON
-                response_body = b'{}'
+                response_body_str = str(response_body)
         else:
-            # For other response types
+            # For other response types, get body bytes
             response_body = getattr(response, 'body', b'')
-            if isinstance(response_body, str):
-                response_body = response_body.encode('utf-8')
-            if not response_body:
-                response_body = b'{}'
+            if isinstance(response_body, bytes):
+                try:
+                    body_json = json.loads(response_body.decode('utf-8'))
+                    response_body_str = json.dumps(body_json)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    response_body_str = response_body.decode('utf-8', errors='replace')
+            else:
+                response_body_str = str(response_body) if response_body else '{}'
+        
+        # Store headers without content-length and other transport headers
+        cache_headers = {
+            k: v for k, v in dict(response.headers).items()
+            if k.lower() not in ['content-length', 'content-encoding', 'transfer-encoding']
+        }
         
         idempotency_manager.cache_response(
             idempotency_key,
             response.status_code,
-            dict(response.headers),
-            response_body
+            cache_headers,
+            response_body_str.encode('utf-8') if isinstance(response_body_str, str) else response_body_str
         )
     
     return response

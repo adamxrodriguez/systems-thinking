@@ -47,10 +47,11 @@ class TestTokenBucket:
     def test_capacity_limit(self, redis_client):
         """Test bucket respects capacity."""
         bucket = TokenBucket(redis_client, capacity=5, refill_rate=1.0)
-        assert bucket.consume("test_client", tokens=3) is True
-        assert bucket.consume("test_client", tokens=3) is True  # Total 6, but capacity is 5
-        # Should fail on third consume exceeding capacity
-        assert bucket.consume("test_client", tokens=1) is False
+        assert bucket.consume("test_client", tokens=3) is True  # 2 tokens remaining
+        assert bucket.consume("test_client", tokens=3) is False  # Only 2 tokens available, can't consume 3
+        # Should succeed with remaining tokens
+        assert bucket.consume("test_client", tokens=2) is True  # Exactly 2 tokens available
+        assert bucket.consume("test_client", tokens=1) is False  # No tokens left
     
     def test_refill_rate(self, redis_client):
         """Test tokens refill over time."""

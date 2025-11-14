@@ -125,9 +125,10 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         client_id = self._get_client_id(request)
         
         if not self.bucket.consume(client_id):
-            raise HTTPException(
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Rate limit exceeded. Please try again later.",
+                content={"detail": "Rate limit exceeded. Please try again later."},
                 headers={
                     "X-RateLimit-Limit": str(self.capacity),
                     "X-RateLimit-Remaining": "0",
